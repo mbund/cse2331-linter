@@ -1,3 +1,4 @@
+use core::num;
 use std::{
     collections::HashSet,
     env, fs,
@@ -83,40 +84,132 @@ fn lint_preproccessed_nondebug(file: &Path) {
     }
 }
 
-fn count_lines_compound_statement(file: &Path, node: Node<'_>) -> usize {
+fn count_lines_statement(file: &Path, node: Node) -> usize {
+    let mut linecount = 0;
+    match node.kind() {
+        "declaration" => {
+            let declarator = node.child_by_field_name("declarator");
+            if let Some(d) = declarator {
+                if d.kind() == "init_declarator" {
+                    let range = d.range();
+                    let value = range.start_point.row - range.start_point.row + 1;
+                    linecount += value;
+                    count_debug(file, range.start_point.row, "INIT", value);
+                }
+            }
+        }
+        "if_statement" => {
+            linecount += count_lines_if_statement(file, node);
+        }
+        "while_statement" => {
+            let condition = node.child_by_field_name("condition").unwrap();
+            let condition_range = condition.range();
+            let value = condition_range.end_point.row - condition_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, condition_range.start_point.row, "WHILE", value);
+
+            let body = node.child_by_field_name("body").unwrap();
+            linecount += count_lines_statement(file, body);
+        }
+        "do_statement" => {
+            let body = node.child_by_field_name("body").unwrap();
+            linecount += count_lines_statement(file, body);
+
+            let condition = node.child_by_field_name("condition").unwrap();
+            let condition_range = condition.range();
+            let value = condition_range.end_point.row - condition_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, condition_range.start_point.row, "DO", value);
+        }
+        "for_statement" => {
+            let num_children = node.child_count();
+            let first_node = node.child(0).unwrap();
+            let penultimate_node = node.child(num_children - 2).unwrap();
+            let body = node.child(num_children - 1).unwrap();
+
+            let value =
+                penultimate_node.range().end_point.row - first_node.range().start_point.row + 1;
+            linecount += value;
+            count_debug(file, first_node.range().start_point.row, "FOR", value);
+
+            linecount += count_lines_statement(file, body);
+        }
+        "switch_statement" => {
+            let condition = node.child_by_field_name("condition").unwrap();
+            let condition_range = condition.range();
+            let value = condition_range.end_point.row - condition_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, condition_range.start_point.row, "SWITCH", value);
+
+            let body = node.child_by_field_name("body").unwrap();
+            linecount += count_lines_statement(file, body);
+        }
+        "expression_statement" => {
+            let expression = node.child(0).unwrap();
+            let expression_range = expression.range();
+            let value = expression_range.start_point.row - expression_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, expression_range.start_point.row, "EXPRESSION", value);
+        }
+        "case_statement" => {
+            let mut count = |node: Node| {
+                let mut cursor = node.walk();
+                for node in node.children(&mut cursor) {
+                    if node.kind() != "break_statement" {
+                        linecount += count_lines_statement(file, node);
+                    }
+                }
+            };
+
+            let expression = node.child(node.child_count() - 1).unwrap();
+            if expression.kind() == "compound_statement" {
+                count(expression);
+            } else {
+                count(node);
+            }
+        }
+        "break_statement" => {
+            let range = node.range();
+            let value = range.start_point.row - range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, range.start_point.row, "BREAK", value);
+        }
+        "continue_statement" => {
+            let range = node.range();
+            let value = range.start_point.row - range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, range.start_point.row, "CONTINUE", value);
+        }
+        "else_clause" => {
+            linecount += count_lines_statement(file, node.child(1).unwrap());
+        }
+        "return_statement" => {
+            let identifier = node.child(1).unwrap();
+            let identifier_range = identifier.range();
+            let value = identifier_range.start_point.row - identifier_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, identifier_range.start_point.row, "RETURN", value);
+        }
+        "compound_statement" => {
+            linecount += count_lines_compound_statement(file, node);
+        }
+        _ => {}
+    }
+    return linecount;
+}
+
+fn count_lines_compound_statement(file: &Path, node: Node) -> usize {
     let mut linecount = 0;
 
     let mut cursor = node.walk();
     for node in node.children(&mut cursor) {
-        if node.kind() == "if_statement" {
-            linecount += count_lines_if_statement(file, node);
-        }
-
-        if node.kind() == "expression_statement" {
-            let identifier = node.child(0).unwrap();
-            let identifier_range = identifier.range();
-            let value = identifier_range.end_point.row - identifier_range.start_point.row + 1;
-            linecount += value;
-            count_debug(file, identifier_range.start_point.row, "EXPRESSION", value);
-        }
-
-        if node.kind() == "return_statement" {
-            let identifier = node.child(1).unwrap();
-            let identifier_range = identifier.range();
-            let value = identifier_range.end_point.row - identifier_range.start_point.row + 1;
-            linecount += value;
-            count_debug(file, identifier_range.start_point.row, "RETURN", value);
-        }
-
-        if node.kind() == "compound_statement" {
-            linecount += count_lines_compound_statement(file, node);
-        }
+        linecount += count_lines_statement(file, node);
     }
 
     return linecount;
 }
 
-fn count_lines_if_statement(file: &Path, node: Node<'_>) -> usize {
+fn count_lines_if_statement(file: &Path, node: Node) -> usize {
     let mut linecount = 0;
 
     let condition = node.child_by_field_name("condition").unwrap();
@@ -126,15 +219,11 @@ fn count_lines_if_statement(file: &Path, node: Node<'_>) -> usize {
     count_debug(file, condition_range.start_point.row, "IF", value);
 
     let consequence = node.child_by_field_name("consequence").unwrap();
-    linecount += count_lines_compound_statement(file, consequence);
+    linecount += count_lines_statement(file, consequence);
 
-    let alternative = node.child_by_field_name("alternative").unwrap();
-    linecount += match alternative.kind() {
-        "compound_statement" => count_lines_compound_statement(file, alternative),
-        "else_clause" => count_lines_compound_statement(file, alternative),
-        "if_statement" => count_lines_if_statement(file, alternative),
-        _ => unreachable!(),
-    };
+    if let Some(alt) = node.child_by_field_name("alternative") {
+        linecount += count_lines_statement(file, alt);
+    }
 
     return linecount;
 }

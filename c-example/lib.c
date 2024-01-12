@@ -3,6 +3,7 @@
 int do_a_thing(float a, float b) {
   float x = a * b;
   float z = b * b;
+  int y;
 
   if (x + z > 100) {
     return x;
@@ -11,8 +12,13 @@ int do_a_thing(float a, float b) {
     return z;
   } else {
     int k = x / z;
-    return k;
+    y = 3;
+    return k * y;
   }
+
+  do {
+    printf("Hello");
+  } while (true);
 
   while (x == 2) {
     z = 4;

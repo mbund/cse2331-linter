@@ -14,3 +14,5 @@ Lint for some extra rules for C
   - A debug block is guarded by `#ifdef DEBUG` and `#endif`
   - There can only be print messages starting with the function name or `ERROR: <function name>`
   - No code may modify any variables
+- Identifiers are all either `lower_snake_case` or `camelCase`
+- Macros are `UPPER_SNAKE_CASE`
