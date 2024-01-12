@@ -1,0 +1,12 @@
+[package]
+name = "cse2331-linter"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+cc = "*"
+
+[dependencies]
+regex = "1.10.2"
+tree-sitter = "0.20.10"
+tree-sitter-c = "0.20.6"
