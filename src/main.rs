@@ -1,13 +1,13 @@
 use std::{
     collections::HashSet,
     env, fs,
-    io::{Read, Stderr, Write},
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
 use regex::Regex;
-use tree_sitter::{Parser, Range};
+use tree_sitter::{Node, Parser, Range};
 
 fn print_error(error: &'static str, file: &Path, source: &str, range: Range) {
     let text = &source[range.start_byte..range.end_byte];
@@ -72,6 +72,82 @@ fn lint_preproccessed_nondebug(file: &Path) {
     let root_node = tree.root_node();
 
     // println!("{:#?}", root_node.to_sexp());
+
+    let mut cursor = root_node.walk();
+    for node in root_node.children(&mut cursor) {
+        if node.kind() == "function_definition" {
+            let body_node = node.child_by_field_name("body").unwrap();
+            let linecount = count_lines_compound_statement(file, body_node);
+            println!("{} lines in total", linecount);
+        }
+    }
+}
+
+fn count_lines_compound_statement(file: &Path, node: Node<'_>) -> usize {
+    let mut linecount = 0;
+
+    let mut cursor = node.walk();
+    for node in node.children(&mut cursor) {
+        if node.kind() == "if_statement" {
+            linecount += count_lines_if_statement(file, node);
+        }
+
+        if node.kind() == "expression_statement" {
+            let identifier = node.child(0).unwrap();
+            let identifier_range = identifier.range();
+            let value = identifier_range.end_point.row - identifier_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, identifier_range.start_point.row, "EXPRESSION", value);
+        }
+
+        if node.kind() == "return_statement" {
+            let identifier = node.child(1).unwrap();
+            let identifier_range = identifier.range();
+            let value = identifier_range.end_point.row - identifier_range.start_point.row + 1;
+            linecount += value;
+            count_debug(file, identifier_range.start_point.row, "RETURN", value);
+        }
+
+        if node.kind() == "compound_statement" {
+            linecount += count_lines_compound_statement(file, node);
+        }
+    }
+
+    return linecount;
+}
+
+fn count_lines_if_statement(file: &Path, node: Node<'_>) -> usize {
+    let mut linecount = 0;
+
+    let condition = node.child_by_field_name("condition").unwrap();
+    let condition_range = condition.range();
+    let value = condition_range.end_point.row - condition_range.start_point.row + 1;
+    linecount += value;
+    count_debug(file, condition_range.start_point.row, "IF", value);
+
+    let consequence = node.child_by_field_name("consequence").unwrap();
+    linecount += count_lines_compound_statement(file, consequence);
+
+    let alternative = node.child_by_field_name("alternative").unwrap();
+    linecount += match alternative.kind() {
+        "compound_statement" => count_lines_compound_statement(file, alternative),
+        "else_clause" => count_lines_compound_statement(file, alternative),
+        "if_statement" => count_lines_if_statement(file, alternative),
+        _ => unreachable!(),
+    };
+
+    return linecount;
+}
+
+fn count_debug(file: &Path, line: usize, reason: &'static str, value: usize) {
+    let source = fs::read_to_string(file).unwrap();
+    let text = source.lines().nth(line).unwrap();
+
+    println!(
+        "Counting {}:{} for {value} line(s) because {reason} {text}",
+        file.to_str().unwrap(),
+        line + 1
+    );
 }
 
 fn discover_files(path: PathBuf) -> HashSet<PathBuf> {
@@ -142,6 +218,7 @@ fn preprocess(file: &Path, debug: bool) -> String {
             reconstructed += src;
         });
     reconstructed = reconstructed.chars().skip(2).collect();
+    // println!("{}", reconstructed);
 
     return reconstructed;
 }

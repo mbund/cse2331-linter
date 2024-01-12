@@ -16,7 +16,7 @@ int a = 3;
 int main() {
   int x = 3;
 
-#ifdef DEBUG
+#ifdef __ASMNAME
   if (x == 3) {
     // this is a comment
     printf("Hello");
@@ -28,6 +28,11 @@ int main() {
 #endif
 
   foo(x);
+
+#ifdef A
+  printf("X");
+#endif
+
   return 0;
 }
 
