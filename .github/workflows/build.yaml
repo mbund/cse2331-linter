@@ -28,15 +28,16 @@ jobs:
         run: |
           cargo build --release --target=x86_64-unknown-linux-musl
           ls -la target/x86_64-unknown-linux-musl/release
+          cp target/x86_64-unknown-linux-musl/release/cse2331-linter cse2331-linter-x86_64-unknown-linux-musl
 
       - name: Get tag name
         id: tag-name
         run: |
           echo "tagname=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      # - name: Release
-      #   env:
-      #     GH_TOKEN: ${{ github.token }}
-      #   run: |
-      #     gh release create ${{ steps.tag-name.outputs.tagname }} -t "Linter" -n "Binary release (${{ steps.tag-name.outputs.tagname }})"
-      #     gh release upload ${{ steps.tag-name.outputs.tagname }} target/release/cse2331-linter
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ steps.tag-name.outputs.tagname }} -t "Linter" -n "Binary release (${{ steps.tag-name.outputs.tagname }})"
+          gh release upload ${{ steps.tag-name.outputs.tagname }} cse2331-linter-x86_64-unknown-linux-musl
