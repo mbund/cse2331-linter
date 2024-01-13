@@ -47,7 +47,11 @@ fn lint_real_source<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>)
             let declarator = node.child_by_field_name("declarator").unwrap();
             if declarator.kind() == "init_declarator" || declarator.kind() == "identifier" {
                 lints.push(Lint {
-                    text: source[node.range().start_byte..node.range().end_byte].to_string(),
+                    text: source
+                        .lines()
+                        .nth(node.range().start_point.row)
+                        .unwrap()
+                        .to_string(),
                     message: "Offending global variable".to_string(),
                     range: node.range(),
                     file,
@@ -66,7 +70,10 @@ fn lint_real_source<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>)
             {
                 let declarator_range = node.child_by_field_name("declarator").unwrap().range();
                 lints.push(Lint {
-                    text: source[declarator_range.start_byte..declarator_range.end_byte]
+                    text: source
+                        .lines()
+                        .nth(declarator_range.start_point.row)
+                        .unwrap()
                         .to_string(),
                     message: "Missing comment directly above function".to_string(),
                     range: declarator_range,
@@ -132,7 +139,9 @@ fn lint_identifiers<'a>(
                     if !screaming_snake_case_regex.is_match(text) {
                         lints.push(Lint {
                             text: source
-                                [identifier.range().start_byte..identifier.range().end_byte]
+                                .lines()
+                                .nth(range.start_point.row)
+                                .unwrap()
                                 .to_string(),
                             message: "Macro is not SCREAMING_SNAKE_CASE".to_string(),
                             range,
@@ -185,7 +194,10 @@ fn lint_preproccessed_nondebug<'a>(file: &'a Path, source: &str, lints: &mut Vec
             if linecount > 10 {
                 let declarator_range = node.child_by_field_name("declarator").unwrap().range();
                 lints.push(Lint {
-                    text: source[declarator_range.start_byte..declarator_range.end_byte]
+                    text: source
+                        .lines()
+                        .nth(declarator_range.start_point.row)
+                        .unwrap()
                         .to_string(),
                     message: format!("Function has more than 10 lines ({})", linecount),
                     range: declarator_range,
@@ -210,13 +222,20 @@ fn count_lines_statement<'a>(
             if let Some(d) = declarator {
                 if d.kind() == "init_declarator" {
                     let range = d.range();
-                    let value = range.start_point.row - range.start_point.row + 1;
+                    let value = range.end_point.row - range.start_point.row + 1;
                     linecount += value;
                     sublints.push(Lint {
                         file,
                         range,
-                        message: "Definition".to_string(),
-                        text: source[range.start_byte..range.end_byte].to_string(),
+                        message: format!(
+                            "Counted definition for {value} line{}",
+                            if value != 1 { "s" } else { "" }
+                        ),
+                        text: source
+                            .lines()
+                            .nth(range.start_point.row)
+                            .unwrap()
+                            .to_string(),
                         sublints: None,
                     });
                 }
@@ -233,8 +252,15 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range: condition_range,
-                message: "While".to_string(),
-                text: source[condition_range.start_byte..condition_range.end_byte].to_string(),
+                message: format!(
+                    "Counted while condition for {value} line{}",
+                    if value != 1 { "s" } else { "" }
+                ),
+                text: source
+                    .lines()
+                    .nth(condition_range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
 
@@ -252,8 +278,15 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range: condition_range,
-                message: "Do".to_string(),
-                text: source[condition_range.start_byte..condition_range.end_byte].to_string(),
+                message: format!(
+                    "Counted do/while condition for {value} line{}",
+                    if value != 1 { "s" } else { "" }
+                ),
+                text: source
+                    .lines()
+                    .nth(condition_range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
         }
@@ -270,8 +303,15 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range,
-                message: "For".to_string(),
-                text: source[range.start_byte..range.end_byte].to_string(),
+                message: format!(
+                    "Counted for condition for {value} line{}",
+                    if value != 1 { "s" } else { "" }
+                ),
+                text: source
+                    .lines()
+                    .nth(range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
 
@@ -285,8 +325,15 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range: condition_range,
-                message: "Switch".to_string(),
-                text: source[condition_range.start_byte..condition_range.end_byte].to_string(),
+                message: format!(
+                    "Counted switch expression for {value} line{}",
+                    if value != 1 { "s" } else { "" }
+                ),
+                text: source
+                    .lines()
+                    .nth(condition_range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
 
@@ -301,8 +348,15 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range: expression_range,
-                message: "Expression".to_string(),
-                text: source[expression_range.start_byte..expression_range.end_byte].to_string(),
+                message: format!(
+                    "Counted expression for {value} line{}",
+                    if value != 1 { "s" } else { "" }
+                ),
+                text: source
+                    .lines()
+                    .nth(expression_range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
         }
@@ -325,25 +379,31 @@ fn count_lines_statement<'a>(
         }
         "break_statement" => {
             let range = node.range();
-            let value = range.start_point.row - range.start_point.row + 1;
-            linecount += value;
+            linecount += 1;
             sublints.push(Lint {
                 file,
                 range,
-                message: "Break".to_string(),
-                text: source[range.start_byte..range.end_byte].to_string(),
+                message: "Counted break for 1 line".to_string(),
+                text: source
+                    .lines()
+                    .nth(range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
         }
         "continue_statement" => {
             let range = node.range();
-            let value = range.start_point.row - range.start_point.row + 1;
-            linecount += value;
+            linecount += 1;
             sublints.push(Lint {
                 file,
                 range,
-                message: "Continue".to_string(),
-                text: source[range.start_byte..range.end_byte].to_string(),
+                message: "Counted continue for 1 line".to_string(),
+                text: source
+                    .lines()
+                    .nth(range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
         }
@@ -353,13 +413,16 @@ fn count_lines_statement<'a>(
         "return_statement" => {
             let identifier = node.child(1).unwrap();
             let identifier_range = identifier.range();
-            let value = identifier_range.start_point.row - identifier_range.start_point.row + 1;
-            linecount += value;
+            linecount += 1;
             sublints.push(Lint {
                 file,
                 range: identifier_range,
-                message: "Break".to_string(),
-                text: source[identifier_range.start_byte..identifier_range.end_byte].to_string(),
+                message: "Counted break for 1 line".to_string(),
+                text: source
+                    .lines()
+                    .nth(identifier_range.start_point.row)
+                    .unwrap()
+                    .to_string(),
                 sublints: None,
             });
         }
@@ -402,8 +465,15 @@ fn count_lines_if_statement<'a>(
     sublints.push(Lint {
         file,
         range: condition_range,
-        message: "If".to_string(),
-        text: source[condition_range.start_byte..condition_range.end_byte].to_string(),
+        message: format!(
+            "Counted if condition for {value} line{}",
+            if value != 1 { "s" } else { "" }
+        ),
+        text: source
+            .lines()
+            .nth(condition_range.start_point.row)
+            .unwrap()
+            .to_string(),
         sublints: None,
     });
 
