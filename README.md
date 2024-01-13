@@ -10,7 +10,7 @@ Lint for some extra rules for C
   - If statements count (and else if)
   - Else statemetns do not count
   - Opening and closing curly brackets do not count
-- `DEBUG` macro
+- [ ] `DEBUG` macro
   - A debug block is guarded by `#ifdef DEBUG` and `#endif`
   - There can only be print messages starting with the function name or `ERROR: <function name>`
   - No code may modify any variables
