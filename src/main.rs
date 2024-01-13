@@ -1,9 +1,7 @@
 use std::{
     collections::HashSet,
     env, fs,
-    io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     vec,
 };
 
@@ -32,7 +30,7 @@ impl Lint<'_> {
     }
 }
 
-fn lint_real_source<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>) {
+fn lint<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>) {
     let mut parser = Parser::new();
     parser
         .set_language(tree_sitter_c::language())
@@ -52,7 +50,7 @@ fn lint_real_source<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>)
                         .nth(node.range().start_point.row)
                         .unwrap()
                         .to_string(),
-                    message: "Offending global variable".to_string(),
+                    message: "Global variable".to_string(),
                     range: node.range(),
                     file,
                     sublints: None,
@@ -81,6 +79,24 @@ fn lint_real_source<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>)
                     sublints: None,
                 })
             }
+
+            let body_node = node.child_by_field_name("body").unwrap();
+            let mut sublints: Vec<Lint<'a>> = vec![];
+            let linecount = count_lines_compound_statement(file, &source, body_node, &mut sublints);
+            if linecount > 10 {
+                let declarator_range = node.child_by_field_name("declarator").unwrap().range();
+                lints.push(Lint {
+                    text: source
+                        .lines()
+                        .nth(declarator_range.start_point.row)
+                        .unwrap()
+                        .to_string(),
+                    message: format!("Function has more than 10 lines ({})", linecount),
+                    range: declarator_range,
+                    file,
+                    sublints: Some(sublints),
+                })
+            }
         }
     }
 }
@@ -96,6 +112,7 @@ struct Identifier<'a> {
     file: &'a Path,
     range: Range,
     case: IdentifierCase,
+    text: String,
 }
 
 fn lint_identifiers<'a>(
@@ -158,52 +175,18 @@ fn lint_identifiers<'a>(
                             case: IdentifierCase::LowerSnake,
                             file,
                             range,
+                            text: text.to_string(),
                         });
                     } else if camel_case_regex.is_match(text) {
                         identifiers.push(Identifier {
                             case: IdentifierCase::Camel,
                             file,
                             range,
+                            text: text.to_string(),
                         });
                     }
                 }
                 _ => {}
-            }
-        }
-    }
-}
-
-fn lint_preproccessed_debug() {}
-
-fn lint_preproccessed_nondebug<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>) {
-    let source = preprocess(source, false);
-
-    let mut parser = Parser::new();
-    parser
-        .set_language(tree_sitter_c::language())
-        .expect("Error loading Rust grammar");
-    let tree = parser.parse(&source, None).unwrap();
-    let root_node = tree.root_node();
-
-    let mut cursor = root_node.walk();
-    for node in root_node.children(&mut cursor) {
-        if node.kind() == "function_definition" {
-            let body_node = node.child_by_field_name("body").unwrap();
-            let mut sublints: Vec<Lint<'a>> = vec![];
-            let linecount = count_lines_compound_statement(file, &source, body_node, &mut sublints);
-            if linecount > 10 {
-                let declarator_range = node.child_by_field_name("declarator").unwrap().range();
-                lints.push(Lint {
-                    text: source
-                        .lines()
-                        .nth(declarator_range.start_point.row)
-                        .unwrap()
-                        .to_string(),
-                    message: format!("Function has more than 10 lines ({})", linecount),
-                    range: declarator_range,
-                    file,
-                    sublints: Some(sublints),
-                })
             }
         }
     }
@@ -243,6 +226,16 @@ fn count_lines_statement<'a>(
         }
         "if_statement" => {
             linecount += count_lines_if_statement(file, source, node, sublints);
+        }
+        "preproc_ifdef" => {
+            let name = node.child_by_field_name("name").unwrap();
+            let text = &source[name.range().start_byte..name.range().end_byte];
+            if text != "DEBUG" {
+                let mut cursor = node.walk();
+                for node in node.children(&mut cursor).skip(2) {
+                    linecount += count_lines_statement(file, source, node, sublints);
+                }
+            }
         }
         "while_statement" => {
             let condition = node.child_by_field_name("condition").unwrap();
@@ -518,46 +511,6 @@ fn discover_files(path: PathBuf) -> HashSet<PathBuf> {
     return fileset;
 }
 
-fn preprocess(source: &str, debug: bool) -> String {
-    let args: Vec<&'static str> = if debug {
-        ["-E", "-", "-D", "DEBUG"].to_vec()
-    } else {
-        ["-E", "-"].to_vec()
-    };
-
-    let process = Command::new("gcc")
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute GCC preprocessor");
-
-    process
-        .stdin
-        .expect("Failed to open stdin")
-        .write_all(&source.as_bytes())
-        .expect("Failed to write C code to stdin");
-
-    let mut output = String::new();
-    process.stdout.unwrap().read_to_string(&mut output).unwrap();
-
-    let regex = Regex::new(r#" (?<line>\d+) "(?<path>[^#"]+)"( \d+)*(?<src>[^#]+)#?"#).unwrap();
-    let mut reconstructed = String::new();
-    regex
-        .captures_iter(&output)
-        .filter(|c| c.name("path").unwrap().as_str() == "<stdin>")
-        .for_each(|c| {
-            let line = c.name("line").unwrap().as_str().parse::<usize>().unwrap();
-            let src = c.name("src").unwrap().as_str();
-            reconstructed.extend((reconstructed.lines().count()..line).map(|_| "\n"));
-            reconstructed += src;
-        });
-    reconstructed = reconstructed.chars().skip(2).collect();
-    // println!("{}", reconstructed);
-
-    return reconstructed;
-}
-
 fn main() {
     let filename = "c-example/main.c";
     let path = PathBuf::from(filename);
@@ -573,18 +526,9 @@ fn main() {
     files.sort();
     for file in files.iter() {
         let source = fs::read_to_string(file).unwrap();
-        lint_real_source(file, &source, &mut lints);
-        lint_preproccessed_nondebug(file, &source, &mut lints);
+        lint(file, &source, &mut lints);
         lint_identifiers(file, &source, &mut lints, &mut identifiers);
     }
-
-    lints.sort_by_key(|lint| lint.range.start_point.row);
-    lints.iter().for_each(|lint| {
-        println!("{}", lint.print(parent));
-        for (i, sublint) in lint.sublints.iter().flatten().enumerate() {
-            println!("  {}) {}", i + 1, sublint.print(parent));
-        }
-    });
 
     let snake_case_identifiers = identifiers
         .iter()
@@ -596,23 +540,44 @@ fn main() {
         .filter(|i| i.case == IdentifierCase::Camel)
         .collect::<Vec<&Identifier>>();
 
-    // if snake_case_identifiers.len() > 0 && camel_case_identifiers.len() > 0 {
-    //     for identifier in identifiers.iter() {
-    //         let source = fs::read_to_string(&identifier.file).unwrap();
-    //         let text = &source[identifier.range.start_byte..identifier.range.end_byte];
+    if snake_case_identifiers.len() > 0 && camel_case_identifiers.len() > 0 {
+        let mut snake_case_sublints = snake_case_identifiers
+            .iter()
+            .map(|&identifier| Lint {
+                file: identifier.file,
+                range: identifier.range,
+                text: identifier.text.clone(),
+                message: "Snake case identifier is inconsistent".to_string(),
+                sublints: None,
+            })
+            .collect::<Vec<Lint>>();
+        lints.append(&mut snake_case_sublints);
 
-    //         let t = if identifier.case == IdentifierCase::LowerSnake {
-    //             "snake_case"
-    //         } else {
-    //             "camelCase"
-    //         };
-    //         println!(
-    //             "{}:{} Inconsistent identifier case {t}: `{text}`",
-    //             identifier.file.to_str().unwrap(),
-    //             identifier.range.start_point.row + 1
-    //         );
-    //     }
-    // }
+        let mut camel_case_sublints = camel_case_identifiers
+            .iter()
+            .map(|&identifier| Lint {
+                file: identifier.file,
+                range: identifier.range,
+                text: identifier.text.clone(),
+                message: "Camel case identifier is inconsistent".to_string(),
+                sublints: None,
+            })
+            .collect::<Vec<Lint>>();
+
+        lints.append(&mut camel_case_sublints);
+    }
+
+    lints.sort_by(|a, b| {
+        a.file
+            .cmp(b.file)
+            .then(a.range.start_point.row.cmp(&b.range.start_point.row))
+    });
+    lints.iter().for_each(|lint| {
+        println!("{}", lint.print(parent));
+        for (i, sublint) in lint.sublints.iter().flatten().enumerate() {
+            println!("  {}) {}", i + 1, sublint.print(parent));
+        }
+    });
 
     // println!("{:#?}", identifiers);
 }
