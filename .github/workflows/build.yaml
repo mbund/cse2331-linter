@@ -27,7 +27,6 @@ jobs:
       - name: Build
         run: |
           cargo build --release --target=x86_64-unknown-linux-musl
-          ls -la target/x86_64-unknown-linux-musl/release
           cp target/x86_64-unknown-linux-musl/release/cse2421-linter cse2421-linter-x86_64-unknown-linux-musl
 
       - name: Get tag name
