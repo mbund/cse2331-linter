@@ -9,12 +9,13 @@
 // thanos carpet
 int foo(int x) { return double_twelve_times(x); }
 
-#define MY_COMMENT
+#define MY_COMMENTa b
+#define MY_FUNCTION(a) b
 
 int a = 3;
 
 int main() {
-  int z;
+  int zA;
   int x = 3;
 
 #ifdef A

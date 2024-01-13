@@ -1,17 +1,17 @@
 #include "lib.h"
 
-int do_a_thing(float a, float b) {
-  float x = a * b;
-  float z = b * b;
+int do_a_thing(float param_1, float param_2) {
+  float among_as = param_1 * param_2;
+  float among_us = param_2 * param_2;
   int y;
 
-  if (x + z > 100) {
-    return x;
-  } else if (x + z > 10) {
+  if (among_as + among_us > 100) {
+    return among_as;
+  } else if (among_as + among_us > 10) {
     printf("yeah");
-    return z;
+    return among_us;
   } else {
-    int k = x / z;
+    int k = among_as / among_us;
     y = 3;
     return k * y;
   }
@@ -20,9 +20,9 @@ int do_a_thing(float a, float b) {
     printf("Hello");
   } while (true);
 
-  while (x == 2) {
-    z = 4;
-    return z;
+  while (among_as == 2) {
+    among_us = 4;
+    return among_us;
   }
 
   return 0;

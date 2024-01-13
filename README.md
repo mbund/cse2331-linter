@@ -2,9 +2,9 @@
 
 Lint for some extra rules for C
 
-- No global variables
-- Top level functions must have a comment explaining what they do
-- 10 "meaningful" lines of code per function
+- [x] No global variables
+- [x] Top level functions must have a comment explaining what they do
+- [x] 10 "meaningful" lines of code per function
   - Declarations and comments do not count
   - DEBUG blocks do not count
   - If statements count (and else if)
@@ -14,5 +14,5 @@ Lint for some extra rules for C
   - A debug block is guarded by `#ifdef DEBUG` and `#endif`
   - There can only be print messages starting with the function name or `ERROR: <function name>`
   - No code may modify any variables
-- Identifiers are all either `lower_snake_case` or `camelCase`
-- Macros are `UPPER_SNAKE_CASE`
+- [x] Identifiers are all either `lower_snake_case` or `camelCase`
+- [x] Macros are `UPPER_SNAKE_CASE`

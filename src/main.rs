@@ -1,4 +1,3 @@
-use core::num;
 use std::{
     collections::HashSet,
     env, fs,
@@ -8,7 +7,7 @@ use std::{
 };
 
 use regex::Regex;
-use tree_sitter::{Node, Parser, Range};
+use tree_sitter::{Node, Parser, Query, QueryCursor, Range};
 
 fn print_error(error: &'static str, file: &Path, source: &str, range: Range) {
     let text = &source[range.start_byte..range.end_byte];
@@ -60,6 +59,81 @@ fn lint_real_source(file: &Path) {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum IdentifierCase {
+    LowerSnake,
+    Camel,
+}
+
+#[derive(Debug)]
+struct Identifier {
+    file: PathBuf,
+    range: Range,
+    case: IdentifierCase,
+}
+
+fn lint_identifiers(file: PathBuf, identifiers: &mut Vec<Identifier>) {
+    let source = fs::read_to_string(&file).unwrap();
+
+    let query = Query::new(
+        tree_sitter_c::language(),
+        r#"
+        (declaration (identifier) @identifier)
+        (declaration (init_declarator (identifier) @identifier))
+        (parameter_list (parameter_declaration (identifier) @identifier))
+        (preproc_def) @preproc
+        (preproc_function_def) @preproc
+        "#,
+    )
+    .unwrap();
+
+    let mut parser = Parser::new();
+    parser
+        .set_language(tree_sitter_c::language())
+        .expect("Error loading Rust grammar");
+    let tree = parser.parse(&source, None).unwrap();
+
+    let mut query_cursor = QueryCursor::new();
+    let all_matches = query_cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+    let screaming_snake_case_regex = Regex::new(r"^[A-Z0-9_]+$").unwrap();
+    let lower_snake_case_regex = Regex::new(r"^[a-z0-9_]+_[a-z0-9_]+$").unwrap();
+    let camel_case_regex = Regex::new(r"^[a-z]+(?:[A-Z][a-z0-9]*)+$").unwrap();
+
+    for m in all_matches {
+        for capture in m.captures {
+            match capture.node.kind() {
+                "preproc_def" | "preproc_function_def" => {
+                    let identifier = capture.node.child_by_field_name("name").unwrap();
+                    let range = identifier.range();
+                    let text = &source[range.start_byte..range.end_byte];
+                    if !screaming_snake_case_regex.is_match(text) {
+                        print_error("Macro is not SCREAMING_SNAKE_CASE", &file, &source, range);
+                    }
+                }
+                "identifier" => {
+                    let range = capture.node.range();
+                    let text = &source[range.start_byte..range.end_byte];
+                    if lower_snake_case_regex.is_match(text) {
+                        identifiers.push(Identifier {
+                            case: IdentifierCase::LowerSnake,
+                            file: file.clone(),
+                            range,
+                        });
+                    } else if camel_case_regex.is_match(text) {
+                        identifiers.push(Identifier {
+                            case: IdentifierCase::Camel,
+                            file: file.clone(),
+                            range,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn lint_preproccessed_debug() {}
 
 fn lint_preproccessed_nondebug(file: &Path) {
@@ -72,14 +146,19 @@ fn lint_preproccessed_nondebug(file: &Path) {
     let tree = parser.parse(&source, None).unwrap();
     let root_node = tree.root_node();
 
-    // println!("{:#?}", root_node.to_sexp());
-
     let mut cursor = root_node.walk();
     for node in root_node.children(&mut cursor) {
         if node.kind() == "function_definition" {
             let body_node = node.child_by_field_name("body").unwrap();
             let linecount = count_lines_compound_statement(file, body_node);
-            println!("{} lines in total", linecount);
+            if linecount > 10 {
+                print_error(
+                    "Function has more than 10 lines",
+                    file,
+                    &source,
+                    node.child_by_field_name("declarator").unwrap().range(),
+                );
+            }
         }
     }
 }
@@ -229,6 +308,7 @@ fn count_lines_if_statement(file: &Path, node: Node) -> usize {
 }
 
 fn count_debug(file: &Path, line: usize, reason: &'static str, value: usize) {
+    /*
     let source = fs::read_to_string(file).unwrap();
     let text = source.lines().nth(line).unwrap();
 
@@ -237,6 +317,7 @@ fn count_debug(file: &Path, line: usize, reason: &'static str, value: usize) {
         file.to_str().unwrap(),
         line + 1
     );
+     */
 }
 
 fn discover_files(path: PathBuf) -> HashSet<PathBuf> {
@@ -318,11 +399,44 @@ fn main() {
     env::set_current_dir(path.parent().unwrap()).unwrap();
     let local_path = PathBuf::from(path.file_name().unwrap());
 
+    let mut identifiers: Vec<Identifier> = vec![];
+
     let fileset = discover_files(local_path);
     let mut files: Vec<PathBuf> = fileset.into_iter().collect();
     files.sort();
     for file in files {
         lint_real_source(&file);
         lint_preproccessed_nondebug(&file);
+        lint_identifiers(file, &mut identifiers);
     }
+
+    let snake_case_identifiers = identifiers
+        .iter()
+        .filter(|i| i.case == IdentifierCase::LowerSnake)
+        .collect::<Vec<&Identifier>>();
+
+    let camel_case_identifiers = identifiers
+        .iter()
+        .filter(|i| i.case == IdentifierCase::Camel)
+        .collect::<Vec<&Identifier>>();
+
+    if snake_case_identifiers.len() > 0 && camel_case_identifiers.len() > 0 {
+        for identifier in identifiers.iter() {
+            let source = fs::read_to_string(&identifier.file).unwrap();
+            let text = &source[identifier.range.start_byte..identifier.range.end_byte];
+
+            let t = if identifier.case == IdentifierCase::LowerSnake {
+                "snake_case"
+            } else {
+                "camelCase"
+            };
+            println!(
+                "{}:{} Inconsistent identifier case {t}: `{text}`",
+                identifier.file.to_str().unwrap(),
+                identifier.range.start_point.row + 1
+            );
+        }
+    }
+
+    // println!("{:#?}", identifiers);
 }
