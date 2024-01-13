@@ -1,0 +1,31 @@
+name: Build and Release
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/**
+      - Cargo.toml
+      - Cargo.lock
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Get tag name
+        id: tag-name
+        run: |
+          echo "tagname=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ steps.tag-name.outputs.tagname }} -t "Linter" -n "Binary release (${{ steps.tag-name.outputs.tagname }})"
+          gh release upload ${{ steps.tag-name.outputs.tagname }} target/release/cse2331-linter
