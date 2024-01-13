@@ -1,12 +1,12 @@
+use clap::Parser;
+use regex::Regex;
 use std::{
     collections::HashSet,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     vec,
 };
-
-use regex::Regex;
-use tree_sitter::{Node, Parser, Query, QueryCursor, Range};
+use tree_sitter::{Node, Query, QueryCursor, Range};
 
 #[derive(Debug)]
 struct Lint<'a> {
@@ -18,10 +18,10 @@ struct Lint<'a> {
 }
 
 impl Lint<'_> {
-    fn print(&self, parent: &Path) -> String {
+    fn print(&self) -> String {
         format!(
             "{}:{}:{} {} `{}`",
-            parent.join(self.file).to_str().unwrap(),
+            self.file.to_str().unwrap(),
             self.range.start_point.row + 1,
             self.range.start_point.column + 1,
             self.message,
@@ -30,8 +30,22 @@ impl Lint<'_> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum IdentifierCase {
+    LowerSnake,
+    Camel,
+}
+
+#[derive(Debug)]
+struct Identifier<'a> {
+    file: &'a Path,
+    range: Range,
+    case: IdentifierCase,
+    text: String,
+}
+
 fn lint<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>) {
-    let mut parser = Parser::new();
+    let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(tree_sitter_c::language())
         .expect("Error loading Rust grammar");
@@ -101,20 +115,6 @@ fn lint<'a>(file: &'a Path, source: &str, lints: &mut Vec<Lint<'a>>) {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum IdentifierCase {
-    LowerSnake,
-    Camel,
-}
-
-#[derive(Debug)]
-struct Identifier<'a> {
-    file: &'a Path,
-    range: Range,
-    case: IdentifierCase,
-    text: String,
-}
-
 fn lint_identifiers<'a>(
     file: &'a Path,
     source: &str,
@@ -133,7 +133,7 @@ fn lint_identifiers<'a>(
     )
     .unwrap();
 
-    let mut parser = Parser::new();
+    let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(tree_sitter_c::language())
         .expect("Error loading Rust grammar");
@@ -336,7 +336,7 @@ fn count_lines_statement<'a>(
         "expression_statement" => {
             let expression = node.child(0).unwrap();
             let expression_range = expression.range();
-            let value = expression_range.start_point.row - expression_range.start_point.row + 1;
+            let value = expression_range.end_point.row - expression_range.start_point.row + 1;
             linecount += value;
             sublints.push(Lint {
                 file,
@@ -376,7 +376,7 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range,
-                message: "Counted break for 1 line".to_string(),
+                message: "Counted break statement for 1 line".to_string(),
                 text: source
                     .lines()
                     .nth(range.start_point.row)
@@ -391,7 +391,7 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range,
-                message: "Counted continue for 1 line".to_string(),
+                message: "Counted continue statement for 1 line".to_string(),
                 text: source
                     .lines()
                     .nth(range.start_point.row)
@@ -410,7 +410,7 @@ fn count_lines_statement<'a>(
             sublints.push(Lint {
                 file,
                 range: identifier_range,
-                message: "Counted break for 1 line".to_string(),
+                message: "Counted return statement for 1 line".to_string(),
                 text: source
                     .lines()
                     .nth(identifier_range.start_point.row)
@@ -487,7 +487,7 @@ fn discover_files(path: PathBuf) -> HashSet<PathBuf> {
     let parent = path.parent().unwrap();
 
     let source = fs::read_to_string(path.clone()).unwrap();
-    let mut parser = Parser::new();
+    let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(tree_sitter_c::language())
         .expect("Error loading C grammar");
@@ -511,18 +511,32 @@ fn discover_files(path: PathBuf) -> HashSet<PathBuf> {
     return fileset;
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Files to lint
+    #[arg()]
+    files: Vec<String>,
+}
+
 fn main() {
-    let filename = "c-example/main.c";
-    let path = PathBuf::from(filename);
-    let parent = path.parent().unwrap();
-    env::set_current_dir(parent).unwrap();
-    let local_path = PathBuf::from(path.file_name().unwrap());
+    let args = Args::parse();
+
+    let mut files = args
+        .files
+        .iter()
+        .map(|file| {
+            let path = PathBuf::from(file);
+            let mut fileset = discover_files(path.clone());
+            fileset.insert(path);
+            fileset.into_iter().collect::<Vec<PathBuf>>()
+        })
+        .flatten()
+        .collect::<Vec<PathBuf>>();
 
     let mut identifiers: Vec<Identifier> = vec![];
     let mut lints: Vec<Lint> = vec![];
 
-    let fileset = discover_files(local_path);
-    let mut files: Vec<PathBuf> = fileset.into_iter().collect();
     files.sort();
     for file in files.iter() {
         let source = fs::read_to_string(file).unwrap();
@@ -547,7 +561,7 @@ fn main() {
                 file: identifier.file,
                 range: identifier.range,
                 text: identifier.text.clone(),
-                message: "Snake case identifier is inconsistent".to_string(),
+                message: "Snake case identifier contributes to case inconsistency".to_string(),
                 sublints: None,
             })
             .collect::<Vec<Lint>>();
@@ -559,7 +573,7 @@ fn main() {
                 file: identifier.file,
                 range: identifier.range,
                 text: identifier.text.clone(),
-                message: "Camel case identifier is inconsistent".to_string(),
+                message: "Camel case identifier contributes to case inconsistency".to_string(),
                 sublints: None,
             })
             .collect::<Vec<Lint>>();
@@ -573,11 +587,13 @@ fn main() {
             .then(a.range.start_point.row.cmp(&b.range.start_point.row))
     });
     lints.iter().for_each(|lint| {
-        println!("{}", lint.print(parent));
+        println!("{}", lint.print());
         for (i, sublint) in lint.sublints.iter().flatten().enumerate() {
-            println!("  {}) {}", i + 1, sublint.print(parent));
+            println!("  {}) {}", i + 1, sublint.print());
         }
     });
 
-    // println!("{:#?}", identifiers);
+    if lints.len() > 0 {
+        std::process::exit(1);
+    }
 }
