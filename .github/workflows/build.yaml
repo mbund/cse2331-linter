@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: |
           cargo build --release --target=x86_64-unknown-linux-musl
-          ls -la target/x86_64-unknown-linux-musl
+          ls -la target/x86_64-unknown-linux-musl/release
 
       - name: Get tag name
         id: tag-name
