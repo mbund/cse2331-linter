@@ -1,4 +1,4 @@
-# CSE 2331 Rule Linter
+# CSE 2421 Rule Linter
 
 Lint for some extra rules for C
 

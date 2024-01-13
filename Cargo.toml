@@ -1,5 +1,5 @@
 [package]
-name = "cse2331-linter"
+name = "cse2421-linter"
 version = "0.1.0"
 edition = "2021"
 

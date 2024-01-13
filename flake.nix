@@ -13,7 +13,7 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        name = "cse2331-linter";
+        name = "cse2421-linter";
         pkgs = import nixpkgs {
           inherit system;
         };
